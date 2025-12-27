@@ -2,6 +2,7 @@ import express from 'express';
 import Order from '../models/Order.js';
 import Cart from '../models/Cart.js';
 import { protect, adminOnly } from '../middleware/auth.js';
+import { sendOrderConfirmationEmail, sendOrderCancellationEmail } from '../utils/emailService.js';
 
 const router = express.Router();
 
@@ -14,7 +15,7 @@ router.post('/', protect, async (req, res) => {
 
     // Get user's cart
     const cart = await Cart.findOne({ user: req.user._id }).populate('items.product');
-    
+
     if (!cart || cart.items.length === 0) {
       return res.status(400).json({
         success: false,
@@ -68,6 +69,9 @@ router.post('/', protect, async (req, res) => {
     // Clear cart
     await Cart.findOneAndDelete({ user: req.user._id });
 
+    // Send confirmation email (async, don't wait for it)
+    sendOrderConfirmationEmail(order, req.user).catch(err => console.error('Email trigger failed:', err));
+
     res.status(201).json({
       success: true,
       message: 'Order placed successfully',
@@ -89,7 +93,7 @@ router.post('/', protect, async (req, res) => {
 router.get('/', protect, async (req, res) => {
   try {
     const { status, page = 1, limit = 10 } = req.query;
-    
+
     let query = { user: req.user._id };
     if (status) {
       query.orderStatus = status;
@@ -218,6 +222,9 @@ router.put('/:orderNumber/cancel', protect, async (req, res) => {
 
     await order.save();
 
+    // Send cancellation email (async)
+    sendOrderCancellationEmail(order, req.user).catch(err => console.error('Email trigger failed:', err));
+
     res.json({
       success: true,
       message: 'Order cancelled successfully',
@@ -249,7 +256,7 @@ router.put('/:orderNumber/status', protect, adminOnly, async (req, res) => {
     }
 
     order.orderStatus = status;
-    
+
     if (trackingNumber) {
       order.trackingNumber = trackingNumber;
     }
